@@ -8,7 +8,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, LinearSegmentedColormap
 from matplotlib.patches import Rectangle
 
 from bot.config import PLAYER_CODES
@@ -21,8 +21,17 @@ INK_SECONDARY = "#52514e"
 INK_MUTED = "#898781"
 UNPLAYED = "#e1e0d9"  # no score: uncolored gray, no number
 
-# Score heatmap: 0 -> red, MAX_SCORE (perfect) -> green.
-SCORE_CMAP = plt.get_cmap("RdYlGn")
+# Score heatmap.
+SCORE_CMAP = LinearSegmentedColormap.from_list(
+    "flashback_clamped",
+    reversed([
+        (1.0, "#008238"),    # Full green for perfect score
+        (20/28, "#f7f775"),  # Yellow for a mediocre 20/28
+        (13/28, "#f12c21"),  # Red for an indisputably bad 13/28
+        (.0001, "#663D19"),  # 💩
+        (0.0, "#E033F0"),    # Easter egg for pink cow contrarians
+    ])
+)
 MAX_SCORE = 28
 
 CELL_WIDTH_IN = 0.55  # figure inches per week column
