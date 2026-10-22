@@ -1,8 +1,8 @@
 import sqlite3
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
-from bot.config import DB_PATH, PLAYER_CODES
+from bot.config import DB_PATH, PLAYER_CODES, TIMEZONE
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS players (
@@ -209,12 +209,12 @@ def has_score(code: str, puzzle_date: str) -> bool:
 
 
 def get_pending(code: str) -> list[str]:
+    # Every Saturday since the first recorded edition counts, not just the
+    # ones somebody already scored: otherwise a week nobody has played yet
+    # (e.g. because the announcement failed to go out) never shows up.
     conn = get_connection()
     try:
-        played_dates = {
-            row["puzzle_date"]
-            for row in conn.execute("SELECT DISTINCT puzzle_date FROM scores")
-        }
+        first = conn.execute("SELECT MIN(puzzle_date) AS d FROM scores").fetchone()["d"]
         own_dates = {
             row["puzzle_date"]
             for row in conn.execute(
@@ -224,8 +224,16 @@ def get_pending(code: str) -> list[str]:
     finally:
         conn.close()
 
-    today = date.today().isoformat()
-    pending = sorted(d for d in played_dates - own_dates if d <= today)
+    if first is None:
+        return []
+
+    today = datetime.now(TIMEZONE).date()
+    pending = []
+    d = date.fromisoformat(first)
+    while d <= today:
+        if d.isoformat() not in own_dates:
+            pending.append(d.isoformat())
+        d += timedelta(days=7)
     return pending
 
 

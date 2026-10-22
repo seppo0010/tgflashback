@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import io
 import logging
@@ -10,6 +11,7 @@ from telegram import (
     MessageOriginUser,
     Update,
 )
+from telegram.error import NetworkError
 from telegram.ext import ContextTypes
 
 from bot import chart, db, ocr
@@ -416,23 +418,51 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
 
+# Waits between attempts when the weekly announcement can't reach Telegram,
+# ~4 hours in total. A single timeout at 9:00 used to skip the whole week.
+ANNOUNCE_RETRY_DELAYS = [60, 5 * 60, 15 * 60, 30 * 60, 60 * 60, 2 * 60 * 60]
+
+
+async def _send_with_retry(send, what: str):
+    for attempt, delay in enumerate([*ANNOUNCE_RETRY_DELAYS, None], start=1):
+        try:
+            return await send()
+        except NetworkError:
+            if delay is None:
+                raise
+            logger.warning(
+                "No pude mandar %s (intento %d), reintento en %ds",
+                what,
+                attempt,
+                delay,
+                exc_info=True,
+            )
+            await asyncio.sleep(delay)
+
+
 async def announce_new_edition(context: ContextTypes.DEFAULT_TYPE) -> None:
     # The share message's date is the puzzle's date (e.g. Saturday), but the
     # NYT interactive URL for that same puzzle is dated the day before.
     today = datetime.datetime.now(TIMEZONE).date()
     url = db.interactive_url(today.isoformat())
     pretty = today.strftime("%d/%m")
-    await context.bot.send_message(
-        chat_id=context.job.chat_id,
-        text=f"🔮 Salió el Flashback de esta semana ({pretty}). Jugalo acá:\n{url}",
+    await _send_with_retry(
+        lambda: context.bot.send_message(
+            chat_id=context.job.chat_id,
+            text=f"🔮 Salió el Flashback de esta semana ({pretty}). Jugalo acá:\n{url}",
+        ),
+        "el aviso semanal",
     )
 
     rendered = _render_tabla(today.year)
     if rendered is not None:
         caption, png_bytes = rendered
-        await context.bot.send_photo(
-            chat_id=context.job.chat_id,
-            photo=io.BytesIO(png_bytes),
-            caption=caption,
-            parse_mode="HTML",
+        await _send_with_retry(
+            lambda: context.bot.send_photo(
+                chat_id=context.job.chat_id,
+                photo=io.BytesIO(png_bytes),
+                caption=caption,
+                parse_mode="HTML",
+            ),
+            "la tabla semanal",
         )
